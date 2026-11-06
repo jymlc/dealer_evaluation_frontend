@@ -1,0 +1,62 @@
+name: Verify Dealer Evaluation and capture clone evidence
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements.txt -r products/requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify the three services together
+        run: |
+          python -m gunicorn --chdir products --bind 127.0.0.1:5000 app:app &
+          node pricing/server.js &
+          python -m gunicorn --bind 127.0.0.1:5001 app:app &
+          for port in 5000 8080 5001; do
+            curl --fail --retry 10 --retry-connrefused --retry-delay 1 "http://127.0.0.1:$port/" >/dev/null
+          done
+          python verify_ui.py
+      - name: Capture the official repository clone in a terminal
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xterm scrot
+          cat > "$RUNNER_TEMP/dealer-clone.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -e
+          cd "$RUNNER_TEMP"
+          set -x
+          git clone https://github.com/ibm-developer-skills-network/dealer_evaluation_frontend.git
+          cd dealer_evaluation_frontend
+          git remote -v
+          git ls-files
+          set +x
+          touch "$RUNNER_TEMP/dealer-clone-ready"
+          sleep 30
+          EOF
+          mkdir -p screenshots
+          xvfb-run --server-args="-screen 0 1300x760x24" bash -c '
+            xterm -geometry 135x34+12+12 -fa Monospace -fs 12 -bg "#16212d" -fg "#eaf0f5" -T "Dealer Evaluation | Git clone" -e bash "$RUNNER_TEMP/dealer-clone.sh" &
+            term=$!
+            for attempt in {1..30}; do
+              if test -f "$RUNNER_TEMP/dealer-clone-ready"; then break; fi
+              sleep 1
+            done
+            test -f "$RUNNER_TEMP/dealer-clone-ready" || exit 1
+            scrot -o screenshots/03-cloned-repository.png
+            kill "$term"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dealer-clone-screenshot
+          path: screenshots/03-cloned-repository.png
+          if-no-files-found: error
