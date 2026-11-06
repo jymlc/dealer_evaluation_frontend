@@ -1,0 +1,77 @@
+name: Capture Dealer Evaluation browser screenshots
+on:
+  push:
+    paths:
+      - '.github/workflows/dealer-browser-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements.txt -r products/requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Capture the working frontend
+        run: |
+          python -m gunicorn --chdir products --bind 127.0.0.1:5000 app:app &
+          node pricing/server.js &
+          python -m gunicorn --bind 127.0.0.1:5001 app:app &
+          for port in 5000 8080 5001; do
+            curl -fsS --retry 10 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$port/" >/dev/null
+          done
+          mkdir -p screenshots
+          python - <<'PY'
+          from playwright.sync_api import expect, sync_playwright
+
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch()
+              page = browser.new_page(viewport={'width': 1150, 'height': 760})
+              page.goto('http://127.0.0.1:5001/')
+              products = page.get_by_label('Product', exact=True)
+              dealers = page.get_by_label('Dealer', exact=True)
+              pricing = page.locator('#pricing')
+
+              def capture_list(select, filename):
+                  # Chromium screenshots omit native select popups. Expand the
+                  # existing control so its actual options are visible in the PNG.
+                  select.evaluate("(element) => { element.size = element.options.length; }")
+                  page.screenshot(path=f'screenshots/{filename}')
+                  select.evaluate("(element) => { element.removeAttribute('size'); }")
+
+              expect(products).to_be_enabled()
+              expect(products.locator('option')).to_have_text([
+                  'Select a product', 'Headphones', 'Laptop', 'Mouse', 'Printer',
+              ])
+              capture_list(products, 'homepage.png')
+
+              products.select_option('Headphones')
+              expect(dealers).to_be_enabled()
+              expect(dealers.locator('option')).to_have_text([
+                  'Select a dealer', 'Binglee', 'DXC Electronics', 'Bobay', 'All Dealers',
+              ])
+              capture_list(dealers, 'product_dealer.png')
+
+              dealers.select_option(label='Binglee')
+              expect(pricing).to_have_text('Headphones costs $30 at Binglee')
+              page.screenshot(path='screenshots/product_dealer_price.png')
+
+              dealers.select_option(label='All Dealers')
+              expect(pricing.get_by_role('row')).to_have_count(4)
+              for name, price in [('Binglee', '$30'), ('DXC Electronics', '$20'), ('Bobay', '$20')]:
+                  expect(pricing.get_by_role('row', name=f'{name} {price}', exact=True)).to_be_visible()
+              page.screenshot(path='screenshots/product_all_dealers_prices.png')
+              browser.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dealer-evaluation-questions-6-to-9
+          path: screenshots/*.png
+          if-no-files-found: error
