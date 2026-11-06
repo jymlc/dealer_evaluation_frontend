@@ -1,0 +1,67 @@
+name: Capture the configured index.html endpoints
+on:
+  push:
+    paths:
+      - '.github/workflows/index-url-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt -r products/requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify both APIs and screenshot the rendered source
+        run: |
+          python -m gunicorn --chdir products --bind 127.0.0.1:5000 app:app &
+          node pricing/server.js &
+          PRODUCT_API_URL=http://127.0.0.1:5000 DEALER_API_URL=http://127.0.0.1:8080 python -m gunicorn --bind 127.0.0.1:5001 app:app &
+          mkdir -p screenshots
+          python - <<'PY'
+          import html
+          import json
+          import time
+          from urllib.request import urlopen
+          from playwright.sync_api import sync_playwright
+
+          def read(url):
+              for attempt in range(15):
+                  try:
+                      with urlopen(url, timeout=4) as response:
+                          return response.read().decode()
+                  except OSError:
+                      if attempt == 14:
+                          raise
+                      time.sleep(1)
+
+          product = 'http://127.0.0.1:5000'
+          dealer = 'http://127.0.0.1:8080'
+          assert 'Headphones' in json.loads(read(product + '/products'))['products']
+          assert '$30' in json.loads(read(dealer + '/price/Binglee/Headphones'))['message']
+          source = read('http://127.0.0.1:5001/').splitlines()
+          start = next(i for i, line in enumerate(source) if 'const productApiUrl' in line)
+          assert product in source[start] and dealer in source[start + 1]
+          lines = '\n'.join(f'{i+1:>3}  {line}' for i, line in enumerate(source) if start <= i < start + 9)
+          with sync_playwright() as p:
+              browser = p.chromium.launch()
+              page = browser.new_page(viewport={'width': 1150, 'height': 590})
+              page.set_content(
+                  '<body style="margin:48px;background:#15202b;color:#eef4fb;font:18px system-ui">'
+                  '<h1>Dealer Evaluation · html/index.html</h1>'
+                  '<p>Rendered source · GitHub Actions local integration environment</p>'
+                  '<pre style="background:#243447;padding:26px;line-height:1.65">'
+                  + html.escape(lines) + '</pre><p>Verified: GET /products and '
+                  'GET /price/Binglee/Headphones returned HTTP 200.</p></body>'
+              )
+              page.screenshot(path='screenshots/index_urlchanges.png')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: index-urlchanges-screenshot
+          path: screenshots/index_urlchanges.png
+          if-no-files-found: error
