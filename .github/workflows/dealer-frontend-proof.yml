@@ -1,0 +1,57 @@
+name: Capture Dealer Evaluation Frontend container deployment
+on:
+  push:
+    paths:
+      - '.github/workflows/dealer-frontend-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy the container and capture the terminal
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xterm xvfb xauth scrot
+          mkdir -p screenshots
+          cat > "$RUNNER_TEMP/product-proof.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -e
+          echo 'Dealer Evaluation Frontend | Docker deployment on GitHub Actions'
+          echo
+          echo '$ docker build -q -t dealer-frontend:demo .'
+          docker build -q -t dealer-frontend:demo .
+          echo
+          echo '$ docker run -d --name dealer-frontend -p 18080:8080 dealer-frontend:demo'
+          docker run -d --name dealer-frontend -p 18080:8080 dealer-frontend:demo
+          if ! curl -fsS --retry 15 --retry-all-errors --retry-delay 1 http://127.0.0.1:18080/ >/dev/null 2>&1; then
+            docker logs dealer-frontend
+            exit 1
+          fi
+          echo
+          echo '$ docker ps --filter name=dealer-frontend'
+          docker ps --filter name=dealer-frontend --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          echo
+          echo '$ curl -sS -i http://127.0.0.1:18080/'
+          curl -fsS -D "$RUNNER_TEMP/frontend-headers.txt" -o "$RUNNER_TEMP/frontend-page.html" http://127.0.0.1:18080/
+          head -n 1 "$RUNNER_TEMP/frontend-headers.txt"
+          grep -F '<title>Dealer Evaluation</title>' "$RUNNER_TEMP/frontend-page.html"
+          EOF
+          set -o pipefail
+          bash "$RUNNER_TEMP/product-proof.sh" | tee "$RUNNER_TEMP/product-proof.txt"
+          xvfb-run --server-args="-screen 0 1260x690x24" bash -c '
+            xterm -geometry 123x30+12+12 -fa Monospace -fs 12 -bg "#15202b" -fg "#f4f7fa" -T "Dealer Evaluation Frontend | Deployment and health check" -e sh -c "cat \"\$RUNNER_TEMP/product-proof.txt\"; sleep 20" &
+            term=$!
+            sleep 2
+            kill -0 "$term" || exit 1
+            scrot -o screenshots/frontend_deploy.png
+            kill "$term"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dealer-frontend-docker-screenshot
+          path: screenshots/frontend_deploy.png
+          if-no-files-found: error
+
