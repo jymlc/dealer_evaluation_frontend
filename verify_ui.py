@@ -1,0 +1,30 @@
+from playwright.sync_api import expect, sync_playwright
+
+with sync_playwright() as playwright:
+    browser = playwright.chromium.launch()
+    page = browser.new_page()
+    page.goto('http://127.0.0.1:5001/')
+    products = page.get_by_label('Product', exact=True)
+    dealers = page.get_by_label('Dealer', exact=True)
+    pricing = page.locator('#pricing')
+    expect(products.locator('option')).to_have_count(5)
+    for product in ('Headphones', 'Laptop', 'Mouse', 'Printer'):
+        products.select_option(product)
+        expect(dealers).to_be_enabled()
+        for option in dealers.locator('option').all()[1:-1]:
+            name = option.text_content()
+            dealers.select_option(label=name)
+            expect(pricing).to_contain_text(f'at {name}')
+        dealers.select_option(label='All Dealers')
+        expect(pricing.get_by_role('row')).to_have_count(dealers.locator('option').count() - 1)
+    products.select_option('Headphones')
+    expect(dealers).to_be_enabled()
+    dealers.select_option(label='Binglee')
+    expect(pricing).to_have_text('Headphones costs $30 at Binglee')
+    dealers.select_option(label='All Dealers')
+    expect(pricing.get_by_role('row')).to_have_count(4)
+    products.select_option('')
+    expect(dealers).to_be_disabled()
+    expect(pricing).to_be_empty()
+    print('Verified product preload, dealer lists, each dealer price, all prices, and reset.')
+    browser.close()

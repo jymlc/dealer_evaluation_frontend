@@ -1,14 +1,13 @@
-from flask import Flask
-from flask_cors import CORS
-from flask import send_from_directory
+import os
+from flask import Flask, render_template
 
-app = Flask("Product deal check")
-CORS(app)
+app = Flask(__name__, template_folder='html')
 
-@app.route("/")
-def getHomePage():
-  return send_from_directory('html', "index.html")
 
-if __name__=="__main__":
-    app.run(port=5001,debug=True) 
-    # When no port is specified, starts at default port 5000
+@app.get('/')
+def home():
+    return render_template(
+        'index.html',
+        product_api_url=os.environ.get('PRODUCT_API_URL', 'http://127.0.0.1:5000'),
+        dealer_api_url=os.environ.get('DEALER_API_URL', 'http://127.0.0.1:8080'),
+    )
