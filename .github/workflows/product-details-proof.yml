@@ -26,7 +26,10 @@ jobs:
           echo
           echo '$ docker run -d --name product-details -p 18080:8080 product-details:demo'
           docker run -d --name product-details -p 18080:8080 product-details:demo
-          curl -fsS --retry 15 --retry-connrefused --retry-delay 1 http://127.0.0.1:18080/products >/dev/null
+          if ! curl -fsS --retry 15 --retry-all-errors --retry-delay 1 http://127.0.0.1:18080/products >/dev/null 2>&1; then
+            docker logs product-details
+            exit 1
+          fi
           echo
           echo '$ docker ps --filter name=product-details'
           docker ps --filter name=product-details --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
