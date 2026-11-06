@@ -1,102 +1,132 @@
-<html>
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dealer Evaluation</title>
   <style>
-    td:nth-child(even), th:nth-child(even) {
-  background-color: #D6EEEE;
-}
+    body { margin: 0; background: #f1f5f9; color: #173047; font: 17px/1.5 system-ui, sans-serif; }
+    main { max-width: 760px; margin: 60px auto; padding: 0 20px; }
+    h1 { margin: 0; }
+    .card { margin-top: 24px; padding: 24px; background: white; border: 1px solid #d4dfe8; border-radius: 12px; }
+    label { display: block; margin: 0 0 6px; font-weight: 700; }
+    select { width: 100%; margin-bottom: 18px; padding: 8px 12px; font: inherit; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #d4dfe8; text-align: left; }
+    #status { min-height: 1.5em; color: #4a6074; }
   </style>
+</head>
+<body>
+  <main>
+    <h1>Products price comparison</h1>
+    <p>Choose a product and compare the prices offered by its dealers.</p>
+    <section class="card" aria-label="Compare dealer prices">
+      <label for="selProd">Product</label>
+      <select id="selProd" disabled><option value="">Select a product</option></select>
+      <label for="selDealer">Dealer</label>
+      <select id="selDealer" disabled><option value="">Select a dealer</option></select>
+      <p id="status" role="status"></p>
+      <div id="pricing" aria-live="polite"></div>
+    </section>
+  </main>
   <script>
-    let produrl = "http://localhost:5000/"
-    let dealerurl = "http://localhost:8080/"
+    // Code Engine supplies the two deployed HTTPS API base URLs at runtime.
+    const productApiUrl = {{ product_api_url | tojson }};
+    const dealerApiUrl = {{ dealer_api_url | tojson }};
+    const product = document.querySelector('#selProd');
+    const dealer = document.querySelector('#selDealer');
+    const statusMessage = document.querySelector('#status');
+    const pricing = document.querySelector('#pricing');
+    const allDealers = '__all__';
+    let dealerRequest;
+    let priceRequest;
 
-    axios.get(produrl+"products").then(res=>{
-      let selEl = document.createElement("select");
-      selEl.setAttribute("id","selProd")
-      selEl.setAttribute("onChange","getDealers()")
-      let defaultOpt = document.createElement("option");
-      defaultOpt.setAttribute('value',"--SELECT--");
-      defaultOpt.innerText = "--SELECT--";
-      selEl.appendChild(defaultOpt);
-
-      res.data.products.forEach(element => {
-        let optEl = document.createElement("option");
-        optEl.setAttribute('value',element);
-        optEl.innerText = element;
-        selEl.appendChild(optEl);
-      })
-      let prod = document.getElementById('prod_dd');
-      prod.childNodes.forEach(node=>prod.removeChild(node));
-      prod.appendChild(selEl);
-    });
-
-    let getDealers = ()=>{
-      let valToFetch = document.getElementById("selProd").value;
-
-      if(valToFetch != "--SELECT--") {
-        axios.get(produrl+"getdealers/"+valToFetch).then(res=>{
-        let selEl = document.createElement("select");
-        selEl.setAttribute("id","selDealer")
-        selEl.setAttribute("onChange","getDealerProductPrice()")
-        let defaultOpt = document.createElement("option");
-        defaultOpt.setAttribute('value',"--SELECT--");
-        defaultOpt.innerText = "--SELECT--";
-        selEl.appendChild(defaultOpt);
-        res.data.dealers.forEach((element)=>{
-          let optEl = document.createElement("option");
-          optEl.setAttribute('value',element);
-          optEl.innerText = element;
-          selEl.appendChild(optEl);
-        })
-        let optEl = document.createElement("option");
-        optEl.setAttribute('value','All Dealers');
-        optEl.innerText = 'All Dealers';
-        selEl.appendChild(optEl);
-
-        let dealers = document.getElementById('dealers');
-        dealers.childNodes.forEach(node=>dealers.removeChild(node));
-        dealers.appendChild(selEl);
-        })
+    async function get(base, path, signal) {
+      const response = await fetch(base.replace(/\/+$/, '') + '/' + path, { signal });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
     }
-  }
-  
-    let getDealerProductPrice = ()=>{
-      let prodvalToFetch = document.getElementById("selProd").value;
-      let dealervalToFetch = document.getElementById("selDealer").value;
 
-      let pricingEl = document.getElementById("pricing");
-      pricingEl.childNodes.forEach(node=>pricingEl.removeChild(node));
+    function resetDealers() {
+      dealer.replaceChildren(new Option('Select a dealer', ''));
+      dealer.disabled = true;
+      pricing.replaceChildren();
+    }
 
-      if (dealervalToFetch != 'All Dealers') {
-        axios.get(dealerurl+"price/"+dealervalToFetch+"/"+prodvalToFetch).then(res=>{
-          document.getElementById("pricing").innerText = res.data.message;
-        })
-      } else {
-        axios.get(dealerurl+"allprice/"+prodvalToFetch).then(res=>{
-          let table = document.createElement("table")
+    function reportError(error, message) {
+      if (error.name !== 'AbortError') statusMessage.textContent = message;
+    }
 
-          res.data.prices.forEach((price)=>{
-            let tr = document.createElement("tr")
-            tr.innerHTML = "<td>"+price.key + "</td><td>"+price.value + "</td>";
-            table.appendChild(tr);
-          });
-
-          if(table.hasChildNodes()) {
-            pricingEl.appendChild(table);
-          }
-        })
+    async function loadProducts() {
+      statusMessage.textContent = 'Loading products…';
+      try {
+        const { products } = await get(productApiUrl, 'products');
+        for (const name of products) product.add(new Option(name, name));
+        product.disabled = products.length === 0;
+        statusMessage.textContent = products.length ? '' : 'No products are available.';
+      } catch (error) {
+        reportError(error, 'Could not load products.');
       }
     }
-    
 
-</script>
-<h1>
-    Products price comparison
-    <div style='margin:6mm' id='prod_dd'></div>
-    <div style='margin:6mm' id='dealers'></div>
-    <div style='margin:6mm;font-size: large;' id='pricing'></div>
+    product.addEventListener('change', async () => {
+      dealerRequest?.abort();
+      priceRequest?.abort();
+      resetDealers();
+      statusMessage.textContent = '';
+      if (!product.value) return;
+      dealerRequest = new AbortController();
+      statusMessage.textContent = 'Loading dealers…';
+      try {
+        const { dealers } = await get(productApiUrl, 'getdealers/' + encodeURIComponent(product.value), dealerRequest.signal);
+        for (const name of dealers) dealer.add(new Option(name, name));
+        if (dealers.length) dealer.add(new Option('All Dealers', allDealers));
+        dealer.disabled = dealers.length === 0;
+        statusMessage.textContent = dealers.length ? '' : 'No dealers supply this product.';
+      } catch (error) {
+        reportError(error, 'Could not load dealers.');
+      }
+    });
 
-</h1>
+    function showPrices(prices) {
+      const table = document.createElement('table');
+      const header = table.createTHead().insertRow();
+      for (const name of ['Dealer', 'Price']) {
+        const cell = document.createElement('th');
+        cell.scope = 'col';
+        cell.textContent = name;
+        header.append(cell);
+      }
+      const body = table.createTBody();
+      for (const { key, value } of prices) {
+        const row = body.insertRow();
+        row.insertCell().textContent = key;
+        row.insertCell().textContent = value;
+      }
+      pricing.replaceChildren(table);
+    }
 
+    dealer.addEventListener('change', async () => {
+      priceRequest?.abort();
+      pricing.replaceChildren();
+      statusMessage.textContent = '';
+      if (!product.value || !dealer.value) return;
+      priceRequest = new AbortController();
+      const productName = encodeURIComponent(product.value);
+      const all = dealer.value === allDealers;
+      const path = all ? 'allprice/' + productName : 'price/' + encodeURIComponent(dealer.value) + '/' + productName;
+      statusMessage.textContent = 'Loading prices…';
+      try {
+        const result = await get(dealerApiUrl, path, priceRequest.signal);
+        if (all) showPrices(result.prices);
+        else pricing.textContent = result.message;
+        statusMessage.textContent = '';
+      } catch (error) {
+        reportError(error, 'Could not load prices.');
+      }
+    });
 
-
+    loadProducts();
+  </script>
+</body>
 </html>
