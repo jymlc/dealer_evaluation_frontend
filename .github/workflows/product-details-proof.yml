@@ -1,0 +1,55 @@
+name: Capture Product Details container deployment
+on:
+  push:
+    paths:
+      - '.github/workflows/product-details-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy the container and capture the terminal
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xterm xvfb xauth scrot
+          mkdir -p screenshots
+          cat > "$RUNNER_TEMP/product-proof.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -e
+          echo 'Product Details | Docker deployment on GitHub Actions'
+          echo
+          echo '$ docker build -q -t product-details:demo ./products'
+          docker build -q -t product-details:demo ./products
+          echo
+          echo '$ docker run -d --name product-details -p 8080:8080 product-details:demo'
+          docker run -d --name product-details -p 8080:8080 product-details:demo
+          curl -fsS --retry 15 --retry-connrefused --retry-delay 1 http://localhost:8080/products >/dev/null
+          echo
+          echo '$ docker ps --filter name=product-details'
+          docker ps --filter name=product-details --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          echo
+          echo '$ curl -sS -i http://localhost:8080/products'
+          curl -sS -i http://localhost:8080/products
+          touch "$RUNNER_TEMP/product-proof-ready"
+          sleep 40
+          EOF
+          xvfb-run --server-args="-screen 0 1260x690x24" bash -c '
+            xterm -geometry 123x30+12+12 -fa Monospace -fs 12 -bg "#15202b" -fg "#f4f7fa" -T "Product Details | Deployment and health check" -e bash "$RUNNER_TEMP/product-proof.sh" &
+            term=$!
+            for attempt in {1..150}; do
+              if test -f "$RUNNER_TEMP/product-proof-ready"; then break; fi
+              kill -0 "$term" || exit 1
+              sleep 1
+            done
+            test -f "$RUNNER_TEMP/product-proof-ready"
+            scrot -o screenshots/product_details_deploy.png
+            kill "$term"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: product-details-docker-screenshot
+          path: screenshots/product_details_deploy.png
+          if-no-files-found: error
