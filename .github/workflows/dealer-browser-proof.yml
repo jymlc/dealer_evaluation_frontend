@@ -18,7 +18,6 @@ jobs:
         with:
           node-version: '22'
       - run: pip install -r requirements.txt -r products/requirements.txt playwright
-      - run: python -m playwright install --with-deps chromium
       - name: Capture the working frontend
         run: |
           python -m gunicorn --chdir products --bind 127.0.0.1:5000 app:app &
@@ -32,7 +31,7 @@ jobs:
           from playwright.sync_api import expect, sync_playwright
 
           with sync_playwright() as playwright:
-              browser = playwright.chromium.launch()
+              browser = playwright.chromium.launch(channel='chrome')
               page = browser.new_page(viewport={'width': 1150, 'height': 760})
               page.goto('http://127.0.0.1:5001/')
               products = page.get_by_label('Product', exact=True)
