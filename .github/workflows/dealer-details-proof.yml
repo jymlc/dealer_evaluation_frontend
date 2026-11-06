@@ -1,0 +1,55 @@
+name: Capture Dealer Pricing (Node.js) container deployment
+on:
+  push:
+    paths:
+      - '.github/workflows/dealer-details-proof.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy the container and capture the terminal
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xterm xvfb xauth scrot
+          mkdir -p screenshots
+          cat > "$RUNNER_TEMP/product-proof.sh" <<'EOF'
+          #!/usr/bin/env bash
+          set -e
+          echo 'Dealer Pricing (Node.js) | Docker deployment on GitHub Actions'
+          echo
+          echo '$ docker build -q -t dealer-details:demo ./pricing'
+          docker build -q -t dealer-details:demo ./pricing
+          echo
+          echo '$ docker run -d --name dealer-details -p 18080:8080 dealer-details:demo'
+          docker run -d --name dealer-details -p 18080:8080 dealer-details:demo
+          if ! curl -fsS --retry 15 --retry-all-errors --retry-delay 1 http://127.0.0.1:18080/price/Binglee/Headphones >/dev/null 2>&1; then
+            docker logs dealer-details
+            exit 1
+          fi
+          echo
+          echo '$ docker ps --filter name=dealer-details'
+          docker ps --filter name=dealer-details --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          echo
+          echo '$ curl -sS -i http://127.0.0.1:18080/price/Binglee/Headphones'
+          curl -fsS -i http://127.0.0.1:18080/price/Binglee/Headphones
+          EOF
+          set -o pipefail
+          bash "$RUNNER_TEMP/product-proof.sh" | tee "$RUNNER_TEMP/product-proof.txt"
+          xvfb-run --server-args="-screen 0 1260x690x24" bash -c '
+            xterm -geometry 123x30+12+12 -fa Monospace -fs 12 -bg "#15202b" -fg "#f4f7fa" -T "Dealer Pricing (Node.js) | Deployment and health check" -e sh -c "cat \"\$RUNNER_TEMP/product-proof.txt\"; sleep 20" &
+            term=$!
+            sleep 2
+            kill -0 "$term" || exit 1
+            scrot -o screenshots/dealer_details_deploy.png
+            kill "$term"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dealer-details-docker-screenshot
+          path: screenshots/dealer_details_deploy.png
+          if-no-files-found: error
+
